@@ -1,53 +1,96 @@
 # mobile_remote_coding_client
 
-## 프로젝트 개요
+Windows 데스크탑에서 실행되는 `desktop_remote_coding_agent`에 연결하여, 스마트폰에서 **Codex App Server 기반 개발 작업을 제어하는 모바일 클라이언트**다.
 
-Windows Desktop에서 실행되는 Remote Coding Agent에 연결하여 스마트폰에서 Codex 기반 개발 작업을 제어하는 모바일 클라이언트다.
+이 앱은 모바일 IDE가 아니라 **Codex Remote Control / Review Client**를 목표로 한다.
 
-이 앱은 모바일 IDE를 만드는 것이 아니라, 스마트폰에서 Codex Agent에게 작업을 지시하고 진행 상황과 변경 사항을 검토하며 필요한 작업을 승인하는 UX를 목표로 한다.
+> 핵심 UX: 명령 → 관찰 → 승인 → 검토
+
+---
+
+## 핵심 아키텍처
+
+```text
+┌──────────────────────┐
+│ Mobile Client        │
+│ Flutter / Android    │
+└──────────┬───────────┘
+           │
+           │ Tailscale
+           │ REST / WebSocket
+           ▼
+┌──────────────────────────────┐
+│ Desktop Remote Coding Agent  │
+│                              │
+│ Auth / Events / Approvals    │
+│ Git / Build / Test           │
+└──────────────┬───────────────┘
+               │
+               │ JSON-RPC
+               ▼
+┌──────────────────────────────┐
+│ Codex App Server             │
+│ Thread → Turn → Item         │
+└──────────────────────────────┘
+```
+
+모바일 앱은 Codex App Server에 직접 연결하지 않는다.
+
+Desktop Agent가 Codex 프로토콜과 네트워크 연결을 관리하고 모바일에는 안정적인 애플리케이션 API를 제공한다.
 
 ---
 
 ## 핵심 목표
 
-스마트폰만으로 다음 Workflow를 수행할 수 있어야 한다.
+스마트폰에서 다음 Workflow를 수행한다.
 
 ```text
+Desktop 연결
+    ↓
 프로젝트 선택
     ↓
-Codex Session 선택
+Codex Thread 선택/생성
     ↓
 개발 요청
     ↓
-Codex 작업 진행
+실시간 작업 진행 확인
     ↓
-결과 확인
+필요한 Command/File/Permission 승인
     ↓
-Diff 확인
+작업 완료
     ↓
-Test 확인
-    ↓
-Commit / Push 승인
+Diff / Test 결과 검토
 ```
-
-모바일에서는 코드 작성 자체보다 Agent에게 작업을 지시하고 결과를 검토하는 경험을 우선한다.
 
 ---
 
 ## 지원 환경
 
-초기 우선순위:
+초기:
 
 - Android
+- Flutter + VS Code 권장
 
 향후:
 
 - iOS
 
-구현 후보:
+---
 
-- Flutter
-- Kotlin Compose
+## 핵심 데이터 모델
+
+모바일은 Codex의 다음 개념을 UI 모델로 사용한다.
+
+```text
+Project
+  └── Thread
+       └── Turn
+            ├── User Message
+            ├── Agent Message
+            ├── Command Execution
+            ├── File Change
+            └── Approval
+```
 
 ---
 
@@ -55,22 +98,15 @@ Commit / Push 승인
 
 ```text
 Connection
-     │
-     ▼
-Desktop
-     │
-     ▼
+   ↓
 Project List
-     │
-     ▼
+   ↓
 Project
-     │
-     ├── Agent Chat
-     ├── Sessions
-     ├── Git
-     ├── Diff
-     ├── Test
-     └── Terminal
+   ├── Chat
+   ├── Activity
+   ├── Changes
+   ├── Tests
+   └── Terminal/Tools
 ```
 
 ---
@@ -79,195 +115,195 @@ Project
 
 ### FR-M01. Desktop 등록
 
-등록 정보:
+저장 정보:
 
 - 이름
-- Tailscale IP / Hostname
+- Tailscale IP / MagicDNS hostname
 - Port
-- Authentication Token
+- Client Authentication Token
 
 예:
 
 ```text
 My Desktop
-
-100.x.x.x:8080
+desktop.tailnet-name.ts.net:8080
 ```
 
-### FR-M02. 연결 상태 표시
-
-상태:
+### FR-M02. 연결 상태
 
 - Connected
 - Connecting
 - Disconnected
 - Desktop Offline
+- Reconnecting
 
 ### FR-M03. 자동 재연결
 
-Wi-Fi ↔ LTE/5G 변경 등 일시적인 연결 종료가 발생해도 자동 재연결해야 한다.
+Wi-Fi ↔ LTE/5G 변경 등 네트워크 전환 후 자동 재연결한다.
+
+재연결 후 서버에서 현재 상태를 다시 동기화한다.
 
 ### FR-M04. 프로젝트 목록
 
-프로젝트 카드에서 다음 정보를 표시:
+예:
 
 ```text
 SmartHome
 
-branch: feature/matter
+feature/matter
 3 files changed
 
-Codex: Running
+Codex: Working
+1 approval pending
 ```
 
-### FR-M05. 프로젝트 Dashboard
+### FR-M05. Thread 목록
 
-표시 정보:
+프로젝트에 연결된 Codex Thread를 확인하고 선택할 수 있어야 한다.
 
-- 현재 Branch
-- Git 상태
-- 실행 중인 Codex Session
-- 최근 작업
-- 테스트 상태
+- 새 Thread 생성
+- 기존 Thread Resume
+- 최근 작업 시간
+- 현재 상태
+- 마지막 메시지 요약
 
 ### FR-M06. Codex Chat
 
-Chat 형태로 작업 요청.
+자연어 요청을 입력한다.
+
+```text
+Matter pairing 기능을 구현해줘.
+현재 architecture는 유지하고 테스트까지 작성해.
+```
+
+Desktop Agent가 이를 Codex `turn/start`로 전달한다.
+
+### FR-M07. Streaming 응답
+
+Agent Message delta를 실시간 표시한다.
+
+긴 메시지를 모두 받은 뒤 한 번에 표시하지 않는다.
+
+### FR-M08. Activity Timeline
+
+Codex 작업을 단순 텍스트 로그가 아닌 Item 단위로 보여준다.
 
 예:
 
 ```text
-User
+✓ Read src/auth/AuthService.kt
 
-Matter device pairing 부분 구현해줘.
-기존 architecture는 유지해.
+● Running
+  ./gradlew test
+
+⚠ Approval required
+  npm install axios
+
+✓ Updated
+  PairingManager.kt
 ```
 
-Codex 응답은 Streaming 방식으로 표시한다.
+### FR-M09. Command Approval
 
-### FR-M07. 작업 상태 표시
-
-예:
+Desktop Agent에서 Command Approval 요청이 오면 즉시 사용자에게 표시한다.
 
 ```text
-Reading files...
+실행 승인 필요
 
-Analyzing architecture...
+npm install axios
 
-Editing:
-src/device/PairingManager.kt
+cwd
+/home/user/project
 
-Running tests...
+Reason
+Network access required
+
+[거절] [이번만 승인] [세션 동안 승인]
 ```
 
-### FR-M08. Session 관리
+서버가 제공한 `availableDecisions`를 기준으로 버튼을 구성한다.
 
-- Session 생성
-- Session 조회
-- Session 선택
-- Session 종료
-- 기존 Session 재접속
+### FR-M10. File Change Approval
 
-### FR-M09. Git Status
+파일 변경 승인이 필요한 경우:
 
-예:
+- 대상 파일
+- 변경 요약
+- 승인 사유
+- 가능하면 Diff Preview
+
+를 표시한다.
+
+사용자는 승인/거절할 수 있어야 한다.
+
+### FR-M11. Permission Approval
+
+지원되는 경우 다음 권한 요청을 표시한다.
+
+- Network access
+- 추가 filesystem access
+
+요청 범위를 사용자가 명확히 확인할 수 있어야 한다.
+
+### FR-M12. Approval 상태 처리
+
+Approval 상태:
 
 ```text
-Modified
-
-M PairingManager.kt
-M MatterRepository.kt
-
-Added
-
-A PairingManagerTest.kt
+Pending
+Accepted
+Declined
+Cancelled
+Resolved
 ```
 
-### FR-M10. Diff Viewer
+이미 resolve된 요청의 버튼은 비활성화한다.
 
-- 파일 단위 변경 내용 조회
-- 추가/삭제 Line 시각적 구분
+### FR-M13. Turn 중단
 
-예:
+작업 중:
 
 ```text
-PairingManager.kt
-
-+ suspend fun pairDevice(...)
-+ {
-+     ...
-+ }
-```
-
-### FR-M11. Test 실행
-
-예:
-
-```text
-Run Tests
-```
-
-결과:
-
-```text
-42 Tests
-
-41 Passed
-1 Failed
-```
-
-실패한 테스트 선택 시 상세 로그를 표시한다.
-
-### FR-M12. Build 실행
-
-- 프로젝트 Build 실행
-- 진행 상태 표시
-- Build 결과 표시
-
-### FR-M13. Terminal
-
-고급 사용자를 위한 간단한 Terminal 기능.
-
-예:
-
-```bash
-git status
-git log --oneline -5
-```
-
-전체 SSH Terminal보다 Desktop Agent Command API 사용을 우선한다.
-
-### FR-M14. 작업 취소
-
-Codex 실행 중 작업 Cancel 지원.
-
-```text
-Codex is working...
-
 [Stop]
 ```
 
-### FR-M15. Approval
+을 누르면 Desktop Agent를 통해 Codex Turn interrupt를 요청한다.
 
-Desktop Agent에서 위험 작업 승인 요청 시 모바일에서 승인 또는 거절.
+### FR-M14. Git Status
+
+- 현재 Branch
+- Modified
+- Added
+- Deleted
+- staged / unstaged
+- Ahead / Behind
+
+### FR-M15. Diff Viewer
+
+- 파일별 Diff
+- 추가/삭제 Line 구분
+- staged/unstaged 구분
+- 대용량 Diff 접기
+
+### FR-M16. Build / Test
+
+- Build 실행
+- Test 실행
+- 진행 상태
+- stdout/stderr
+- 성공/실패
+- 실행 시간
+
+Test 결과 예:
 
 ```text
-Codex wants to execute:
+42 tests
 
-git push origin feature/matter
-
-[Reject]      [Approve]
+✓ 41 passed
+✕ 1 failed
 ```
 
-### FR-M16. Commit 생성
-
-- Commit 요청
-- Commit Message 직접 입력
-- Codex를 통한 Commit Message 생성
-
 ### FR-M17. 작업 완료 요약
-
-예:
 
 ```text
 Task Completed
@@ -279,63 +315,67 @@ Changed
 Added
 - PairingManagerTest.kt
 
-Test
-✓ 42 Passed
+Tests
+✓ 42 passed
 
 Git
 3 files changed
 ```
 
+### FR-M18. Pending Approval 복구
+
+앱이 백그라운드로 이동하거나 연결이 끊긴 동안 승인 요청이 발생할 수 있다.
+
+재연결 시 Pending Approval 목록을 다시 가져와 사용자에게 표시해야 한다.
+
 ---
 
 ## 핵심 UX
 
-이 앱은 IDE의 모바일 버전을 목표로 하지 않는다.
-
-핵심 UX:
+이 앱은 IDE를 축소해서 휴대폰에 넣는 것이 아니다.
 
 ```text
-명령
-↓
-관찰
-↓
-검토
-↓
-승인
+지시
+ ↓
+진행 상황 관찰
+ ↓
+위험 작업 승인
+ ↓
+결과 검토
 ```
 
-스마트폰에서는 코드 한 줄 한 줄을 작성하기보다 Codex Agent를 관리한다.
+모바일에서 직접 코드를 타이핑하는 것은 보조 기능이다.
 
 ---
 
-## 기본 화면 예시
-
-### Project 화면
+## Project 화면 예시
 
 ```text
 SmartHome
-
 feature/matter
 
-Codex
-● Working
+Codex ● Working
 
 ────────────────────
 
 You
 
-Matter pairing 기능 구현해줘.
+Matter pairing 구현하고
+관련 테스트까지 작성해줘.
 
 ────────────────────
 
 Codex
 
-기존 구조를 확인했습니다.
+기존 Repository 구조를 확인하고 있습니다.
 
-현재 다음 파일을 수정하고 있습니다.
+────────────────────
 
-MatterRepository.kt
-PairingManager.kt
+Activity
+
+✓ Read MatterRepository.kt
+✓ Read PairingManager.kt
+● Running tests...
 
 ────────────────────
 
@@ -344,120 +384,149 @@ PairingManager.kt
 
 ---
 
-## 하단 Navigation
-
-초기 구조:
+## Approval 화면 예시
 
 ```text
-[Chat] [Changes] [Tests] [Terminal]
+⚠ Command Approval
+
+Codex wants to run:
+
+git push origin feature/matter
+
+Working Directory
+/home/user/projects/smart-home
+
+[Decline]
+
+[Accept Once]
+
+[Accept for Session]
+```
+
+---
+
+## 하단 Navigation
+
+```text
+[Chat] [Activity] [Changes] [Tests]
 ```
 
 ### Chat
 
-Codex와 작업 지시 및 대화.
+Codex Thread 대화.
+
+### Activity
+
+Command, File Change, Approval 등 실시간 Item Timeline.
 
 ### Changes
 
-Git Status 및 Diff.
+Git Status / Diff.
 
 ### Tests
 
-Build / Test 결과.
+Build / Test 실행과 결과.
 
-### Terminal
-
-직접 Command 실행.
+Terminal은 MVP 핵심 기능에서 제외하고 추후 Tools 화면으로 확장한다.
 
 ---
 
-## 알림
-
-향후 Push Notification 지원.
-
-알림 대상:
-
-- Codex 작업 완료
-- Build 완료
-- Test 실패
-- 사용자 승인 요청
-- Agent 오류
-
-예:
+## 네트워크
 
 ```text
-Codex finished your task.
-
-3 files changed
-42 tests passed.
+Android
+   │
+   │ Tailscale
+   ▼
+Desktop Agent
 ```
+
+- Port Forwarding 불필요
+- 공용 Internet Endpoint 불필요
+- REST API로 상태/명령 전달
+- WebSocket으로 실시간 이벤트 수신
 
 ---
 
 ## 보안 요구사항
 
-- 인증 Token은 Android Keystore 등에 안전하게 저장
-- 사용자 승인 없는 위험 작업 실행 금지
-- Desktop 연결 정보와 Credential 평문 저장 금지
-- Tailscale Network 외부 연결 기본 차단
+- Desktop Token은 Android Keystore 등에 안전하게 저장
+- Token 평문 파일 저장 금지
+- Approval request ID 검증
+- resolve된 Approval 재실행 금지
+- Desktop Agent가 제공하지 않은 임의 명령 API 노출 금지
+- Tailscale 외부 접속 기본 차단
 
 ---
 
-## 비기능 요구사항
+## 백그라운드 동작
 
-### 모바일 UX
+초기 버전은 항상 연결을 유지하려고 하지 않는다.
 
-- 한 손 사용 가능한 인터페이스
-- 주요 기능 1~2번의 터치로 접근
+앱이 foreground일 때 WebSocket을 유지하고, background에서는 필요 시 연결을 종료할 수 있다.
 
-### 네트워크
+향후 Push Notification을 추가하여 다음 이벤트를 알릴 수 있다.
 
-- 모바일 네트워크의 일시적 연결 종료를 정상 상황으로 간주
-- WebSocket 종료 시 자동 복구
-
-### 배터리
-
-- 백그라운드 지속 Polling 지양
-- WebSocket 또는 Push Notification 우선
+- Approval required
+- Codex task completed
+- Test failed
+- Agent error
 
 ---
 
-## MVP 범위
+## MVP
 
-1차 버전:
+### Phase 1 — Remote Codex
 
 - Desktop 연결
 - 프로젝트 목록
-- 프로젝트 선택
-- Codex Session 생성
-- Codex Prompt 입력
-- Streaming 응답
-- Session 재접속
+- Thread 목록
+- Thread Start / Resume
+- Prompt 입력
+- Agent Message Streaming
+- Activity Timeline
+- Turn Stop
+
+### Phase 2 — Remote Approval
+
+- Command Approval
+- File Change Approval
+- Permission Approval
+- Accept / Accept for Session / Decline
+- Pending Approval 복구
+
+### Phase 3 — Review
+
 - Git Status
-- Git Diff
-- Test 실행
-- Codex 작업 Cancel
+- Diff Viewer
+- Build
+- Test
+- 작업 완료 Summary
 
-MVP 제외 후보:
+---
 
-- Push Notification
-- Commit
-- Push
-- Approval
-- Terminal
-- 여러 Desktop 관리
+## Non-Goals
+
+초기 버전에서는 다음을 목표로 하지 않는다.
+
+- 완전한 모바일 IDE
+- VS Code 원격 화면 복제
+- 모든 Shell command를 자유롭게 실행하는 SSH client
+- Codex App Server에 모바일이 직접 연결
+- 공용 인터넷에 Desktop을 노출
 
 ---
 
 ## 향후 확장
 
-- 여러 Desktop 등록
-- 음성 Codex 명령
-- 사진 / 문서 첨부
-- GitHub Issue 연결
-- Pull Request 확인
-- CI 결과 확인
+- Push Notification
+- 여러 Desktop
+- 여러 Thread 병렬 관리
+- Git commit / push UI
+- GitHub Issue / PR 연동
+- CI 확인
 - 작업 Queue
-- 여러 Agent 동시 작업
-- Agent별 작업 진행률
-- Codex 작업 비용 / Token 확인
-- Desktop 화면 원격 확인
+- 음성 명령
+- 파일 첨부
+- 사진 첨부
+- Codex 작업 요약
